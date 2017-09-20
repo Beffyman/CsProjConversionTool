@@ -44,6 +44,7 @@ namespace CsProjConversionTool
 				.TransformProjectType()
 				.DeletePackageConfig()
 				.RemoveCompileItems()
+				.UpdateNoneItems()
 				.AddRequiredProperties()
 				.RemoveProjectReferenceGuids()
 				.SaveProject()
@@ -246,6 +247,21 @@ namespace CsProjConversionTool
 
 			proj.RemoveItems(removedCompileItems);
 
+
+			var modifiedCompileItems = compileItems.Where(x => !(x.Metadata.Count == 0 && (x.DirectMetadata?.Count() ?? 0) == 0)).ToList();
+
+			foreach (var item in modifiedCompileItems)
+			{
+				var update = item.UnevaluatedInclude;
+				item.Xml.Include = null;//Can't just set because there is a constraint on the set for these
+				item.Xml.Update = update;
+			}
+
+			return proj;
+		}
+		private static Project UpdateNoneItems(this Project proj)
+		{
+			var compileItems = proj.GetItems("None").ToList();
 
 			var modifiedCompileItems = compileItems.Where(x => !(x.Metadata.Count == 0 && (x.DirectMetadata?.Count() ?? 0) == 0)).ToList();
 
