@@ -15,7 +15,7 @@ namespace CsProjConversionTool
 		{
 			if (args.Count() != 1)
 			{
-				throw new Exception("There can only be one arg and it must be the folder that contains the solution and the csproj files");
+				throw new Exception("There can only be one arg and it must be the folder that contains the solution or the csproj files");
 			}
 			var solutionFolder = args.Single();
 
@@ -247,7 +247,9 @@ namespace CsProjConversionTool
 
 			foreach (var item in modifiedCompileItems)
 			{
-				item.ItemType = "None";
+				item.ItemType = "Compile";
+				item.SetMetadataValue("Update", item.UnevaluatedInclude);
+				item.RemoveMetadata("Include");
 			}
 
 			return proj;
