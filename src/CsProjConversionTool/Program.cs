@@ -1,0 +1,273 @@
+﻿using CsProjArrange;
+using System;
+using Microsoft.Build.Evaluation;
+using System.IO;
+using System.Linq;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.Serialization;
+
+namespace CsProjConversionTool
+{
+	public static class Program
+	{
+		static void Main(string[] args)
+		{
+			if (args.Count() != 1)
+			{
+				throw new Exception("There can only be one arg and it must be the folder that contains the solution and the csproj files");
+			}
+			var solutionFolder = args.Single();
+
+			var csProjFiles = Directory.GetFiles(solutionFolder, "*.csproj", SearchOption.AllDirectories);
+
+			foreach (var projectFile in csProjFiles)
+			{
+				ConvertProj(projectFile);
+			}
+		}
+
+
+
+		public static void ConvertProj(string csprojPath)
+		{
+			if (!File.Exists(csprojPath))
+			{
+				throw new Exception($"{csprojPath} does not exist.");
+			}
+
+			new Project(csprojPath, null, null, ProjectCollection.GlobalProjectCollection, ProjectLoadSettings.IgnoreMissingImports)
+				.TransformReferences()
+				.TransformProjectType()
+				.DeletePackageConfig()
+				.RemoveCompileItems()
+				.AddRequiredProperties()
+				.RemoveProjectReferenceGuids()
+				.SaveProject()
+				.SortProject()
+				.RemoveXMLNamespace();
+			Console.WriteLine($"{Path.GetFileNameWithoutExtension(csprojPath)} has been converted to the new csproj format!");
+
+		}
+
+
+		//--------------------------------------------------------------------------------------------------------
+		//-----------------------------------------Project Mutators-----------------------------------------------
+		//--------------------------------------------------------------------------------------------------------
+
+		private static Project TransformReferences(this Project proj)
+		{
+			var nugetReferences = proj.GetItems("Reference").ToList();
+
+
+			Dictionary<string, string> packagesToAdd = new Dictionary<string, string>();
+
+			//Remove package references
+			foreach (var package in nugetReferences)
+			{
+				var hintData = package.GetMetadata("HintPath");
+				if (hintData == null)
+				{
+					continue;
+				}
+
+				var hintPathSplit = hintData.EvaluatedValue.Split('\\');
+				var packageDetails = hintPathSplit[2];
+				var splitDetails = packageDetails.Split('.').ToList();
+				int nonVersionDetail = 0;
+				try
+				{
+					nonVersionDetail = splitDetails.IndexOf(splitDetails.First(x => x.All(c => char.IsNumber(c))));//Find the first full number Value between the .'s  Package.Name.*1*.0.0
+				}
+				catch//This is the case where it isn't a package, but it is a dll reference
+				{
+					continue;
+				}
+
+				string packageName = string.Join(".", splitDetails.Take(nonVersionDetail));
+				string packageVersion = string.Join(".", splitDetails.Skip(nonVersionDetail));
+
+
+				if (packagesToAdd.ContainsKey(packageName))
+				{
+					try
+					{
+						var existing = Semver.SemVersion.Parse(packagesToAdd[packageName]);
+						var attempt = Semver.SemVersion.Parse(packageVersion);
+						if (existing < attempt)
+						{
+							Console.WriteLine($"{packageName}.{packagesToAdd[packageName]} has been converted changed to {packageVersion} due to detection of a higher version being used.");
+							packagesToAdd[packageName] = packageVersion;
+						}
+
+					}
+					catch
+					{
+						ulong existing = ulong.Parse(packagesToAdd[packageName].Replace(".", ""));
+						ulong attempt = ulong.Parse(packageVersion.Replace(".", ""));
+
+						if (existing < attempt)
+						{
+							Console.WriteLine($"{packageName}.{packagesToAdd[packageName]} has been converted changed to {packageVersion} due to detection of a higher version being used.");
+							packagesToAdd[packageName] = packageVersion;
+
+						}
+					}
+				}
+				else
+				{
+					packagesToAdd.Add(packageName, packageVersion);
+				}
+
+				proj.RemoveItem(package);
+
+			}
+
+			foreach (var package in packagesToAdd)
+			{
+				var metaData = new List<KeyValuePair<string, string>>
+				{
+					new KeyValuePair<string, string>("Version", package.Value),
+					new KeyValuePair<string, string>("PrivateAssets", "All")
+				};
+
+
+				proj.AddItem("PackageReference", package.Key, metaData);
+			}
+
+			return proj;
+		}
+
+		private static Project DeletePackageConfig(this Project proj)
+		{
+			var fullPath = Path.GetFullPath($"{proj.ProjectFileLocation.LocationString}/../packages.config");
+
+			var packagesConfigItem = proj.GetItemsByEvaluatedInclude("packages.config").SingleOrDefault();
+			if (packagesConfigItem != null)
+			{
+				proj.RemoveItem(packagesConfigItem);
+				File.Delete(fullPath);
+			}
+
+			return proj;
+		}
+
+		private static Project TransformProjectType(this Project proj)
+		{
+			proj.Xml.Sdk = "Microsoft.NET.Sdk";
+			//proj.Xml.DefaultTargets = null;
+			proj.Xml.ToolsVersion = null;
+			var imports = proj.Xml.Imports.ToList();
+
+			foreach (var import in imports)
+			{
+
+				//Remove known .Net Framework imports
+				if (import.Project.Contains("Microsoft.Common.props")
+					|| import.Project.Contains("Microsoft.CSharp.targets")
+					|| import.Project.Contains("Microsoft.Web.Publishing.targets")
+					|| import.Project.Contains("Microsoft.TestTools.targets"))
+				{
+					proj.Xml.RemoveChild(import);
+				}
+			}
+
+			//Alter Target Version to use .net core's style
+
+			var targetFramework = proj.GetProperty("TargetFrameworkVersion");
+			if (targetFramework == null)
+			{
+				throw new Exception("It seems like this project is not a .Net Framework project, aborting.");
+			}
+
+			var version = targetFramework.EvaluatedValue.Replace("v", "net").Replace(".", "");
+
+			proj.RemoveProperty(targetFramework);
+
+			proj.SetProperty("TargetFramework", version);
+
+
+			return proj;
+		}
+
+		private static Project AddRequiredProperties(this Project proj)
+		{
+
+			proj.SetProperty("RestoreProjectStyle", "PackageReference");
+			proj.SetProperty("EnableDefaultEmbeddedResourceItems", "false");
+			proj.SetProperty("AutoGenerateBindingRedirects", "true");
+			proj.SetProperty("GenerateAssemblyInfo", "false");
+
+			return proj;
+		}
+
+		private static Project SaveProject(this Project proj)
+		{
+			proj.Save();
+
+			return proj;
+		}
+
+		/// <summary>
+		/// https://github.com/miratechcorp/CsProjArrange
+		/// </summary>
+		/// <param name="proj"></param>
+		/// <returns></returns>
+		private static Project SortProject(this Project proj)
+		{
+			new CsProjArrangeConsole().Run(new string[] { $"-input {proj.ProjectFileLocation.LocationString}", "--options=NoSortRootElements" });
+
+			return proj;
+		}
+
+		private static Project RemoveXMLNamespace(this Project proj)
+		{
+			var fileData = File.ReadAllText(proj.ProjectFileLocation.LocationString);
+
+			fileData = fileData.Replace(@" xmlns=""http://schemas.microsoft.com/developer/msbuild/2003""", "")
+				.Replace($@"<?xml version=""1.0"" encoding=""utf-8""?>{Environment.NewLine}", "");
+
+
+			File.WriteAllText(proj.ProjectFileLocation.LocationString, fileData);
+
+			proj.MarkDirty();
+
+			return proj;
+		}
+
+		private static Project RemoveCompileItems(this Project proj)
+		{
+			var compileItems = proj.GetItems("Compile").ToList();
+			var removedCompileItems = compileItems.Where(x => x.Metadata.Count == 0 && (x.DirectMetadata?.Count() ?? 0) == 0).ToList();
+
+			proj.RemoveItems(removedCompileItems);
+
+
+			var modifiedCompileItems = compileItems.Where(x => !(x.Metadata.Count == 0 && (x.DirectMetadata?.Count() ?? 0) == 0)).ToList();
+
+			foreach (var item in modifiedCompileItems)
+			{
+				item.ItemType = "None";
+			}
+
+			return proj;
+		}
+
+		private static Project RemoveProjectReferenceGuids(this Project proj)
+		{
+
+			var projectRefs = proj.GetItems("ProjectReference").ToList();
+			foreach(var pref in projectRefs)
+			{
+				if (pref.HasMetadata("Project"))
+				{
+					pref.RemoveMetadata("Project");
+				}
+			}
+
+
+			return proj;
+		}
+
+	}
+}
