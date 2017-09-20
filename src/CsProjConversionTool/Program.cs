@@ -6,6 +6,7 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.Serialization;
+using System.Text.RegularExpressions;
 
 namespace CsProjConversionTool
 {
@@ -25,6 +26,8 @@ namespace CsProjConversionTool
 			{
 				ConvertProj(projectFile);
 			}
+			Console.WriteLine("All csproj files in the nested directories have been converted!.");
+			Console.ReadKey();
 		}
 
 
@@ -44,8 +47,10 @@ namespace CsProjConversionTool
 				.AddRequiredProperties()
 				.RemoveProjectReferenceGuids()
 				.SaveProject()
+				//Operate on file itself
 				.SortProject()
-				.RemoveXMLNamespace();
+				.RemoveXMLNamespace()
+				.CleanPackageReferences();
 			Console.WriteLine($"{Path.GetFileNameWithoutExtension(csprojPath)} has been converted to the new csproj format!");
 
 		}
@@ -131,7 +136,6 @@ namespace CsProjConversionTool
 					new KeyValuePair<string, string>("PrivateAssets", "All")
 				};
 
-
 				proj.AddItem("PackageReference", package.Key, metaData);
 			}
 
@@ -215,7 +219,7 @@ namespace CsProjConversionTool
 		/// <returns></returns>
 		private static Project SortProject(this Project proj)
 		{
-			new CsProjArrangeConsole().Run(new string[] { $"-input {proj.ProjectFileLocation.LocationString}", "--options=NoSortRootElements" });
+			new CsProjArrangeConsole().Run(new string[] { $"--input={proj.ProjectFileLocation.LocationString}","--options=NoSortRootElements" });
 
 			return proj;
 		}
@@ -247,9 +251,9 @@ namespace CsProjConversionTool
 
 			foreach (var item in modifiedCompileItems)
 			{
-				item.ItemType = "Compile";
-				item.SetMetadataValue("Update", item.UnevaluatedInclude);
-				item.RemoveMetadata("Include");
+				var update = item.UnevaluatedInclude;
+				item.Xml.Include = null;//Can't just set because there is a constraint on the set for these
+				item.Xml.Update = update;
 			}
 
 			return proj;
@@ -265,11 +269,48 @@ namespace CsProjConversionTool
 				{
 					pref.RemoveMetadata("Project");
 				}
+
+				if (pref.HasMetadata("Name"))
+				{
+					pref.RemoveMetadata("Name");
+				}
 			}
 
 
 			return proj;
 		}
 
+
+		private static Project CleanPackageReferences(this Project proj)
+		{
+			var fileData = File.ReadAllText(proj.ProjectFileLocation.LocationString);
+
+			List<dynamic> packages = new List<dynamic>();
+
+			foreach(var item in proj.GetItems("PackageReference"))
+			{
+				packages.Add(new
+				{
+					Name = item.UnevaluatedInclude,
+					Version = item.GetMetadataValue("Version"),
+					XML =
+$@"<PackageReference Include=""{item.UnevaluatedInclude}"">
+      <PrivateAssets>All</PrivateAssets>
+      <Version>{item.GetMetadataValue("Version")}</Version>
+    </PackageReference>"
+				});
+			}
+
+			foreach(var item in packages)
+			{
+				var replacement = $@"<PackageReference Include=""{item.Name}"" Version=""{item.Version}"" PrivateAssets=""All""/>";
+				fileData = fileData.Replace(item.XML, replacement);
+			}
+
+
+			File.WriteAllText(proj.ProjectFileLocation.LocationString, fileData);
+
+			return proj;
+		}
 	}
 }

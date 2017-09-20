@@ -25,7 +25,7 @@ namespace CsProjArrange
     /// </summary>
     public class CsProjArrange
     {
-        private static readonly XmlNodeType[] includeXmlNodeTypes = 
+        private static readonly XmlNodeType[] includeXmlNodeTypes =
             new XmlNodeType[] {
                 XmlNodeType.Comment,
                 XmlNodeType.Element,
@@ -76,8 +76,6 @@ namespace CsProjArrange
 
             _csProjArrangeStrategy.Arrange(input);
 
-            BackupInputFile(inputFile, outputFile);
-
             WriteOutput(input, outputFile);
         }
 
@@ -98,15 +96,6 @@ namespace CsProjArrange
             {
                 // Write the output file.
                 input.Save(outputFile);
-            }
-        }
-
-        private void BackupInputFile(string inputFile, string outputFile)
-        {
-            // Backup input file if we are overwriting.
-            if ((inputFile != null) && (inputFile == outputFile))
-            {
-                File.Copy(inputFile, inputFile + ".bak", true);
             }
         }
     }
