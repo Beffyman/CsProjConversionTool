@@ -134,7 +134,7 @@ namespace CsProjConversionTool
 				var metaData = new List<KeyValuePair<string, string>>
 				{
 					new KeyValuePair<string, string>("Version", package.Value),
-					new KeyValuePair<string, string>("PrivateAssets", "All")
+					//new KeyValuePair<string, string>("PrivateAssets", "All")
 				};
 
 				proj.AddItem("PackageReference", package.Key, metaData);
@@ -311,7 +311,6 @@ namespace CsProjConversionTool
 					Version = item.GetMetadataValue("Version"),
 					XML =
 $@"<PackageReference Include=""{item.UnevaluatedInclude}"">
-      <PrivateAssets>All</PrivateAssets>
       <Version>{item.GetMetadataValue("Version")}</Version>
     </PackageReference>"
 				});
@@ -319,7 +318,7 @@ $@"<PackageReference Include=""{item.UnevaluatedInclude}"">
 
 			foreach(var item in packages)
 			{
-				var replacement = $@"<PackageReference Include=""{item.Name}"" Version=""{item.Version}"" PrivateAssets=""All""/>";
+				var replacement = $@"<PackageReference Include=""{item.Name}"" Version=""{item.Version}""/>";
 				fileData = fileData.Replace(item.XML, replacement);
 			}
 
