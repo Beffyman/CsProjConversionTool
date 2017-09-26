@@ -38,9 +38,22 @@ namespace CsProjConversionTool
 			{
 				throw new Exception($"{csprojPath} does not exist.");
 			}
+			Project proj = null;
 
-			new Project(csprojPath, null, null, ProjectCollection.GlobalProjectCollection, ProjectLoadSettings.IgnoreMissingImports)
-				.TransformReferences()
+			try
+			{
+				proj = new Project(csprojPath, null, null, ProjectCollection.GlobalProjectCollection, ProjectLoadSettings.IgnoreMissingImports);
+			}
+			catch(Exception ex)
+			{
+				var color = Console.ForegroundColor;
+				Console.ForegroundColor = ConsoleColor.Red;
+				Console.WriteLine($"{Path.GetFileNameWithoutExtension(csprojPath)} is not in the .NET Core format already, it cannot be converted!");
+				Console.ForegroundColor = color;
+				return;
+			}
+
+			proj.TransformReferences()
 				.TransformProjectType()
 				.DeletePackageConfig()
 				.RemoveCompileItems()
@@ -52,8 +65,8 @@ namespace CsProjConversionTool
 				.SortProject()
 				.RemoveXMLNamespace()
 				.CleanPackageReferences();
-			Console.WriteLine($"{Path.GetFileNameWithoutExtension(csprojPath)} has been converted to the new csproj format!");
 
+			Console.WriteLine($"{Path.GetFileNameWithoutExtension(csprojPath)} has been converted to the new csproj format!");
 		}
 
 
