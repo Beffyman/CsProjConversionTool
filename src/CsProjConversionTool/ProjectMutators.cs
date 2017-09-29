@@ -32,7 +32,7 @@ namespace CsProjConversionTool
 
 			var actualFiles = Directory.GetFiles(folderPath, "*", SearchOption.AllDirectories).Distinct().ToList();
 
-			var filesToDelete = actualFiles.Except(expectedFiles).ToList();
+			var filesToDelete = actualFiles.Except(expectedFiles, StringComparer.CurrentCultureIgnoreCase).ToList();
 
 			foreach (var deleteMe in filesToDelete)
 			{
@@ -152,18 +152,19 @@ namespace CsProjConversionTool
 			return proj;
 		}
 
-		public static Project AddTestPackageReference(this Project proj)
+		public static Project AddMigrationPackages(this Project proj)
 		{
 			if (Path.GetFileNameWithoutExtension(proj.ProjectFileLocation.File).Contains("Tests"))
 			{
-				var metaData = new List<KeyValuePair<string, string>>
+				var testMetaData = new List<KeyValuePair<string, string>>
 				{
 					new KeyValuePair<string, string>("Version", "1.1.18")
 				};
 
-				proj.AddItem("PackageReference", "MSTest.TestAdapter", metaData);
-				proj.AddItem("PackageReference", "MSTest.TestFramework", metaData);
+				proj.AddItem("PackageReference", "MSTest.TestAdapter", testMetaData);
+				proj.AddItem("PackageReference", "MSTest.TestFramework", testMetaData);
 			}
+
 
 			return proj;
 		}
@@ -185,6 +186,18 @@ namespace CsProjConversionTool
 					|| import.Project.Contains("Microsoft.TestTools.targets"))
 				{
 					proj.Xml.RemoveChild(import);
+				}
+
+				if (import.Project.Contains("Microsoft.WebApplication.targets")
+					&& import.Project.Contains("VSToolsPath"))
+				{
+
+					var targetsMetaData = new List<KeyValuePair<string, string>>
+					{
+						new KeyValuePair<string, string>("Version", "14.0.0.3")
+					};
+
+					proj.AddItem("PackageReference", "MSBuild.Microsoft.VisualStudio.Web.targets", targetsMetaData);
 				}
 			}
 
@@ -212,7 +225,7 @@ namespace CsProjConversionTool
 			proj.SetProperty("RestoreProjectStyle", "PackageReference");
 			proj.SetProperty("EnableDefaultEmbeddedResourceItems", "false");
 			proj.SetProperty("AutoGenerateBindingRedirects", "true");
-			proj.SetProperty("GenerateAssemblyInfo", "false");
+			proj.SetProperty("GenerateBindingRedirectsOutputType", "true");
 
 			return proj;
 		}
@@ -224,6 +237,14 @@ namespace CsProjConversionTool
 			return proj;
 		}
 
+
+		public static Project RemoveAssemblyInfo(this Project proj)
+		{
+			var assemblyInfos = proj.Items.Where(x => x.UnevaluatedInclude.Contains("AssemblyInfo.cs")).ToList();
+			proj.RemoveItems(assemblyInfos);
+
+			return proj;
+		}
 
 
 		public static Project RemoveCompileItems(this Project proj)

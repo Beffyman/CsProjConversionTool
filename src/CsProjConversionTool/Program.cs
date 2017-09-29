@@ -68,9 +68,10 @@ namespace CsProjConversionTool
 				return null;
 			}
 
-			proj.DeleteNonIncludedFiles()
+			proj.RemoveAssemblyInfo()
+				.DeleteNonIncludedFiles()
 				.TransformReferences()
-				.AddTestPackageReference()
+				.AddMigrationPackages()
 				.TransformProjectType()
 				.DeletePackageConfig()
 				.RemoveCompileItems()
@@ -118,42 +119,53 @@ namespace CsProjConversionTool
 
 			var map = nodes.ToString();
 
-			//Mutate current package references within a node dependency tree to update to the same version.
-			bool upgradesFound = true;
-			while (upgradesFound)
+			List<PackageReference> packages = new List<PackageReference>();
+
+
+			void GetDependentPackages(Node<ProjectFile> node, Func<Node<ProjectFile>, IList<Node<ProjectFile>>> listSelector)
 			{
-				upgradesFound = false;
-				foreach (var node in nodes)
+				foreach (var child in listSelector(node))
 				{
-					List<PackageReference> packages = new List<PackageReference>();
-					foreach (var child in node.DependentBy)
-					{
-						packages.AddRange(child.Value.Packages);
-					}
-					foreach (var child in node.DependentOn)
-					{
-						packages.AddRange(child.Value.Packages);
-					}
+					packages.AddRange(child.Value.Packages);
+					GetDependentPackages(child, listSelector);
+				}
+			}
 
-					packages = packages.Distinct().ToList();
-
-					var samePackages = packages.GroupBy(x => x.Name)
-						.Select(x =>
-							x.MaxBy(y => NuGetVersion.Parse(y.Version)))
-						.ToList();
-					foreach (var package in samePackages)
+			void PackageUpdates(Node<ProjectFile> node, Func<Node<ProjectFile>, IList<Node<ProjectFile>>> listSelector, PackageReference package)
+			{
+				foreach (var child in listSelector(node))
+				{
+					var version = child.Value.BackingClass.GetPackageVersion(package.Name);
+					if (version != null && version != package.Version)
 					{
-						foreach (var child in node.DependentBy)
-						{
-							var version = child.Value.BackingClass.GetPackageVersion(package.Name);
-							if (version != null && version != package.Version)
-							{
-								upgradesFound = true;
-								child.Value.BackingClass.MutatePackageReference(package.Name, package.Version);
-								WriteLine($"Project {child.Value.Name} will be updated to {package}", ConsoleColor.Yellow);
-							}
-						}
+						child.Value.BackingClass.MutatePackageReference(package.Name, package.Version);
+						WriteLine($"{child.Value.Name} will be updated to {package}", ConsoleColor.Yellow);
 					}
+					PackageUpdates(child, listSelector, package);
+				}
+			}
+
+			//Mutate current package references within a node dependency tree to update to the same version.
+			foreach (var node in nodes)
+			{
+				GetDependentPackages(node, (x => x.DependentBy));
+				GetDependentPackages(node, (x => x.DependentOn));
+
+				packages = packages.Distinct().ToList();
+
+				packages = packages.GroupBy(x => x.Name)
+					.Select(x =>
+						x.MaxBy(y => NuGetVersion.Parse(y.Version)))
+					.ToList();
+			}
+
+
+			foreach (var node in nodes)
+			{
+				foreach (var package in packages)
+				{
+					PackageUpdates(node, (x => x.DependentBy), package);
+					PackageUpdates(node, (x => x.DependentOn), package);
 				}
 			}
 
